@@ -404,6 +404,7 @@ extern "C" {
 
 LUALIB_API int luaopen_rapidjson(lua_State* L)
 {
+#if LUA_VERSION_NUM >= 502 // LUA 5.2 or above
 	lua_newtable(L); // [rapidjson]
 
 	luax::setfuncs(L, methods); // [rapidjson]
@@ -423,6 +424,27 @@ LUALIB_API int luaopen_rapidjson(lua_State* L)
 	Userdata<Document>::luaopen(L);
 	Userdata<SchemaDocument>::luaopen(L);
 	Userdata<SchemaValidator>::luaopen(L);
+
+#else
+	luaL_register(L, "rapidjson", methods);
+
+	lua_pushliteral(L, "rapidjson"); // [rapidjson, name]
+	lua_setfield(L, -2, "_NAME"); // [rapidjson]
+
+	lua_pushliteral(L, LUA_RAPIDJSON_VERSION); // [rapidjson, version]
+	lua_setfield(L, -2, "_VERSION"); // [rapidjson]
+
+    values::push_null(L); // [rapidjson, json.null]
+    lua_setfield(L, -2, "null"); // [rapidjson]
+
+	createSharedMeta(L, "json.object", "object");
+	createSharedMeta(L, "json.array", "array");
+
+	Userdata<Document>::luaopen(L);
+	Userdata<SchemaDocument>::luaopen(L);
+	Userdata<SchemaValidator>::luaopen(L);
+
+#endif
 
 	return 1;
 }
