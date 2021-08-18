@@ -46,32 +46,79 @@ namespace values {
 	}
 
 	inline bool isarray(lua_State* L, int idx, bool empty_table_as_array = false) {
-		bool arr = false;
-		if (hasJsonType(L, idx, arr)) // any table with a meta field __jsontype set to 'array' are arrays
-			return arr;
+		//bool arr = false;
+		//if (hasJsonType(L, idx, arr)) // any table with a meta field __jsontype set to 'array' are arrays
+		//	return arr;
 
-        idx = luax::absindex(L, idx);
+		//idx = luax::absindex(L, idx);
+		//lua_pushnil(L);
+		//if (lua_next(L, idx) != 0) {
+		//	lua_pop(L, 2);
+
+		//	return luax::rawlen(L, idx) > 0; // any non empty table has length > 0 are treat as array.
+		//}
+
+		//TODO:by yzl
+		idx = luax::absindex(L, idx);
+		int MAX = static_cast<int>(luax::rawlen(L, idx)); // lua_rawlen always returns value >= 0
+
+		int n = 0;
+		int64_t integer = 0;
+
 		lua_pushnil(L);
-		if (lua_next(L, idx) != 0) {
-			lua_pop(L, 2);
-
-			return luax::rawlen(L, idx) > 0; // any non empty table has length > 0 are treat as array.
+		while (lua_next(L, idx))
+		{
+			//TODO:by yzl quick judgment
+			if (lua_type(L, -2) == LUA_TSTRING)
+			{
+				lua_pop(L, 2);
+				return false;
+			}
+			else if (lua_type(L, -2) == LUA_TNUMBER)
+			{
+				if (luax::isinteger(L, -2, &integer))
+				{
+					if (integer <= 0)
+					{
+						lua_pop(L, 2);
+						return false;//小于等于0
+					}
+				}
+				else
+				{
+					lua_pop(L, 2);
+					return false;
+				}
+			}
+			//TODO:by yzl quick judgment
+			n++;
+			lua_pop(L, 1);
 		}
+
+		if (MAX > 0 || n > 0)
+		{
+			return MAX == n;
+		}
+		//TODO:by yzl
 
 		// Now it comes empty table
 		return empty_table_as_array;
 	}
 
-
-
 	/**
 	 * Handle json SAX events and create Lua object.
 	 */
 	struct ToLuaHandler {
-		explicit ToLuaHandler(lua_State* aL) : L(aL) { stack_.reserve(32); }
+		explicit ToLuaHandler(lua_State* aL, bool key2num = false) : L(aL), key2num_(key2num){ stack_.reserve(32); }
 
 		bool Null() {
-			push_null(L);
+			//TODO:by yzl
+			//push_null(L);
+			//TODO:by yzl
+
+			//TODO:by yzl
+			lua_pushnil(L);
+			//TODO:by yzl
 			context_.submit(L);
 			return true;
 		}
@@ -141,10 +188,40 @@ namespace values {
 			return true;
 		}
 		bool Key(const char* str, rapidjson::SizeType length, bool copy) const {
-			lua_pushlstring(L, str, length);
+			if (key2num_)
+			{
+				lua_getglobal(L, "tonumber");
+				lua_pushlstring(L, str, length);
+				lua_call(L, 1, 1);
+				if (lua_type(L, -1) == LUA_TNIL)
+				{
+					lua_pop(L, 1);
+					//TODO:by yzl
+					if (strncmp(str, "_NUM_", 5) == 0)
+					{
+						char* numstr = strtok((char*)str, "_NUM_");
+						lua_pushlstring(L, numstr, length - 5);
+						return true;
+					}
+					//TODO:by yzl
+					lua_pushlstring(L, str, length);
+				}
+			}
+			else
+			{				
+				lua_pushlstring(L, str, length);
+			}			
 			return true;
 		}
 		bool EndObject(rapidjson::SizeType memberCount) {
+			//TODO:by yzl 
+			if (memberCount == 0)
+			{
+				//空表时不添加元表
+				lua_pushnil(L);
+				lua_setmetatable(L, -2);
+			}
+			//TODO:by yzl
 			context_ = stack_.back();
 			stack_.pop_back();
 			context_.submit(L);
@@ -166,6 +243,14 @@ namespace values {
 		}
 		bool EndArray(rapidjson::SizeType elementCount) {
 			assert(elementCount == context_.index_);
+			//TODO:by yzl 
+			if (elementCount == 0)
+			{
+				//空表时不添加元表
+				lua_pushnil(L);
+				lua_setmetatable(L, -2);
+			}
+			//TODO:by yzl
 			context_ = stack_.back();
 			stack_.pop_back();
 			context_.submit(L);
@@ -219,6 +304,7 @@ namespace values {
 		};
 
 		lua_State* L;
+		bool key2num_;
 		std::vector < Ctx > stack_;
 		Ctx context_;
 	};
@@ -245,7 +331,25 @@ namespace values {
     template<typename Stream>
     inline int pushDecoded(lua_State* L, Stream& s) {
         int top = lua_gettop(L);
-        values::ToLuaHandler handler(L);
+		int opt = 0;
+		bool key2num = false;
+
+		switch (lua_type(L, 1)) 
+		{
+		case LUA_TSTRING:
+			opt = 2;
+			break;
+		case LUA_TLIGHTUSERDATA:
+			opt = 3;
+			break;
+		}
+		if (opt > 0 && !lua_isnoneornil(L, opt))
+		{
+			luaL_checktype(L, opt, LUA_TTABLE);
+			key2num = luax::optboolfield(L, opt, "key2num", false);
+		}
+
+		values::ToLuaHandler handler(L, key2num);
         rapidjson::Reader reader;
         rapidjson::ParseResult r = reader.Parse(s, handler);
 

@@ -13,18 +13,18 @@
 #  define RAPIDJSON_SSE2
 #endif
 
-#include "rapidjson/document.h"
-#include "rapidjson/encodedstream.h"
-#include "rapidjson/error/en.h"
-#include "rapidjson/error/error.h"
-#include "rapidjson/filereadstream.h"
-#include "rapidjson/filewritestream.h"
-#include "rapidjson/prettywriter.h"
-#include "rapidjson/rapidjson.h"
-#include "rapidjson/reader.h"
-#include "rapidjson/schema.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/writer.h"
+#include "document.h"
+#include "encodedstream.h"
+#include "error/en.h"
+#include "error/error.h"
+#include "filereadstream.h"
+#include "filewritestream.h"
+#include "prettywriter.h"
+#include "rapidjson.h"
+#include "reader.h"
+#include "schema.h"
+#include "stringbuffer.h"
+#include "writer.h"
 
 
 #include "Userdata.hpp"
@@ -146,8 +146,10 @@ class Encoder {
 	bool empty_table_as_array;
 	int max_depth;
 	static const int MAX_DEPTH_DEFAULT = 128;
+	bool key2num;
+	bool toobject;	
 public:
-	Encoder(lua_State*L, int opt) : pretty(false), sort_keys(false), empty_table_as_array(false), max_depth(MAX_DEPTH_DEFAULT)
+	Encoder(lua_State*L, int opt) : pretty(false), sort_keys(false), empty_table_as_array(false), max_depth(MAX_DEPTH_DEFAULT), key2num(false), toobject(false)
 	{
 		if (lua_isnoneornil(L, opt))
 			return;
@@ -157,6 +159,8 @@ public:
 		sort_keys = luax::optboolfield(L, opt, "sort_keys", false);
 		empty_table_as_array = luax::optboolfield(L, opt, "empty_table_as_array", false);
 		max_depth = luax::optintfield(L, opt, "max_depth", MAX_DEPTH_DEFAULT);
+		key2num = luax::optboolfield(L, opt, "key2num", false);
+		toobject = luax::optboolfield(L, opt, "toobject", false);
 	}
 
 private:
@@ -213,7 +217,7 @@ private:
 			luaL_error(L, "stack overflow");
 
 		idx = luax::absindex(L, idx);
-		if (values::isarray(L, idx, empty_table_as_array))
+		if (!toobject && values::isarray(L, idx, empty_table_as_array))
 		{
 			encodeArray(L, writer, idx, depth);
 			return;
@@ -264,9 +268,49 @@ private:
 			{
 				size_t len = 0;
 				const char* key = lua_tolstring(L, -2, &len);
+
+				if (key2num)
+				{
+					//TODO:by yzl
+					lua_getglobal(L, "tonumber");
+					lua_pushlstring(L, key, len);
+					lua_call(L, 1, 1);
+					if (lua_type(L, -1) == LUA_TNUMBER)
+					{
+						lua_pop(L, 1);
+						char numkey[255] = "_NUM_";
+						strcat(numkey, key);
+						len += 5;
+						writer->Key(numkey, static_cast<SizeType>(len));
+						encodeValue(L, writer, -1, depth);
+					}
+					else
+					{
+						lua_pop(L, 1);
+						writer->Key(key, static_cast<SizeType>(len));
+						encodeValue(L, writer, -1, depth);
+					}
+					//TODO:by yzl
+				}				
+				else
+				{
+					writer->Key(key, static_cast<SizeType>(len));
+					encodeValue(L, writer, -1, depth);
+				}
+			}
+			//TODO:by yzl
+			else if(lua_type(L, -2) == LUA_TNUMBER)
+			{	
+				double copynumber = lua_tonumber(L, -2);
+				lua_pushnumber(L, copynumber);
+				size_t len = 0;
+				const char* key = lua_tolstring(L, -1, &len);
+				lua_pop(L, 1);				
+
 				writer->Key(key, static_cast<SizeType>(len));
 				encodeValue(L, writer, -1, depth);
 			}
+			//TODO:by yzl
 
 			// pop value, leaving original key
 			lua_pop(L, 1);
